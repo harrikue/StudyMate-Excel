@@ -124,6 +124,96 @@ def validate_answer(
 
     return False, "This exercise has an unsupported answer type."
 
+   st.set_page_config(page_title="StudyMate Excel", page_icon="📘", layout="wide")
+DATA = Path(__file__).parent / "data" / "sales_dataset.xlsx"
+
+MODULES = [
+("Excel Basics", "Understand workbooks, worksheets, rows, columns and cells.", [
+("Meet the spreadsheet", "A workbook is an Excel file. It contains worksheets. A worksheet has rows and columns. A cell is one box where a row and column meet.", "Cell B3 is in column B and row 3.", "What is the name of one box where a row and column meet?", "cell", "It is where a row and column meet.", "The answer starts with C.", "How would you explain the difference between a row and a column?"),
+("Enter and organise data", "Click a cell and type. You can enter text, numbers and dates. Numbers can be used in calculations.", "A shop might enter Apples in A2 and 12 in B2.", "What type of data is 25 when entered as a number?", "number", "It can be used in a calculation.", "It is not text or a date.", "What information might a shop record?")
+]),
+("Formulas and Calculations", "Use formulas to make Excel calculate for you.", [
+("Create your first formula", "A formula tells Excel to calculate something. Every formula starts with an equals sign. Cell references let Excel use values stored in cells.", "If A1 contains 5 and A2 contains 3, =A1+A2 returns 8.", "What symbol must appear first in an Excel formula?", "=", "It is the symbol used to show equality.", "It looks like two short horizontal lines.", "Why are cell references useful when values change?")
+]),
+("Essential Excel Functions", "Learn SUM, AVERAGE, COUNTIF and SUMIF.", [
+("Add values with SUM", "SUM adds numbers in a range. It is useful for totals such as daily sales.", "If sales are in B2:B4, =SUM(B2:B4) adds them.", "Sales are £12, £18 and £10. What is the total?", "40", "Add the three sales values.", "12 + 18 + 10 = ?", "When might a shop use SUM?"),
+("Find the mean with AVERAGE", "AVERAGE adds values and divides by how many values there are. It helps describe a typical transaction.", "For 10, 20 and 30, =AVERAGE(A1:A3) returns 20.", "Find the average of 10, 20 and 30.", "20", "Add the values, then divide by how many there are.", "The total is 60. Divide by 3.", "How could average sales help a shop owner?"),
+("Count matching values with COUNTIF", "COUNTIF counts how many cells meet one condition, such as how many sales came from Scotland.", '=COUNTIF(D2:D27,"Scotland") counts Scotland entries.', "A list contains Scotland, Wales, Scotland. How many entries are Scotland?", "2", "Count only the entries that say Scotland.", "Scotland appears twice.", "What other category could you count?"),
+("Add matching values with SUMIF", "SUMIF checks one range for a condition and adds matching values from another range.", '=SUMIF(D2:D27,"Scotland",H2:H27) adds revenue for Scotland.', "Scotland sales are 12 and 8. Wales sales are 5. What is the Scotland total?", "20", "Ignore the Wales value.", "Add 12 and 8.", "How is SUMIF different from COUNTIF?")
+]),
+("Sorting and Filtering Data", "Find information quickly in a list of records.", [
+("Sort and filter a list", "Sorting changes the order of records. Filtering temporarily shows only records that match a condition.", "Sort revenue largest to smallest to find top sales. Filter Region to show Scotland only.", "You want to see only sales from Scotland. Should you sort or filter?", "filter", "You want to hide other regions temporarily.", "Filtering displays only matching records.", "When would sorting be more useful?")
+]),
+("Practical Sales Analysis Project", "Apply your new skills to a small shop's sales.", [
+("Explore the sales dataset", "A sales dataset stores one transaction per row. Use totals, averages and regional results to understand performance.", "Use SUM on Revenue for total revenue and AVERAGE for the average transaction.", "Which function adds revenue for Scotland only?", "sumif", "You need to add values that meet a condition.", "The function name combines SUM and IF.", "What business question could you answer?")
+])
+]
+
+def key(m,l): return f"{m}-{l}"
+def lessons(): return [(m,l,x) for m,mod in enumerate(MODULES) for l,x in enumerate(mod[2])]
+def init():
+    for k,v in {"page":"Home","module":0,"lesson":0,"completed":[],"attempts":{},"hints":{}}.items():
+        if k not in st.session_state: st.session_state[k]=v
+def go(page): st.session_state.page=page; st.rerun()
+def open_lesson(m,l):
+    st.session_state.module=m
+    st.session_state.lesson=l
+    st.session_state.practice_lesson_index=next(
+        (i for i,(lesson_m,lesson_l,_) in enumerate(lessons()) if (lesson_m,lesson_l)==(m,l)), 0
+    )
+    go("Lesson")
+
+def excel_column_name(number):
+    """Convert a 1-based column number to Excel letters (1=A, 27=AA)."""
+    letters = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+def answers_match(submitted, expected):
+    """Compare numeric answers numerically and text answers exactly (case-insensitive)."""
+    submitted_text = submitted.strip().replace("£", "").replace(",", "").replace(" ", "")
+    expected_text = expected.strip().replace("£", "").replace(",", "").replace(" ", "")
+    try:
+        return Decimal(submitted_text) == Decimal(expected_text)
+    except InvalidOperation:
+        return submitted.strip().casefold() == expected.strip().casefold()
+
+def sidebar():
+    st.sidebar.title("📘 StudyMate Excel")
+    st.sidebar.caption("Your friendly guide to Excel")
+    for p in ["Home","Learn","Practice","Sales Project","My Progress"]:
+        if st.sidebar.button(p, use_container_width=True, type="primary" if st.session_state.page==p else "secondary"): go(p)
+    st.sidebar.divider()
+    st.sidebar.caption(f"Lessons completed: {len(st.session_state.completed)}/{len(lessons())}")
+    st.sidebar.progress(len(st.session_state.completed)/len(lessons()))
+
+def home():
+    st.title("Welcome to StudyMate Excel! 👋")
+    st.write("Learn Excel step by step, even if you've never used it before.")
+    items=lessons(); done=len(st.session_state.completed)
+    a,b=st.columns([2,1])
+    nxt=next((x for x in items if key(x[0],x[1]) not in st.session_state.completed),None)
+    with a:
+        st.subheader("Continue learning")
+        if nxt:
+            m,l,x=nxt; st.info(f"**{x[0]}**  \n{MODULES[m][0]} · About 5 minutes")
+            if st.button("Continue Learning",type="primary"): open_lesson(m,l)
+        else:
+            st.success("You've completed all lessons. Try the sales project.")
+            if st.button("Open Sales Project",type="primary"): go("Sales Project")
+    with b:
+        st.subheader("Your progress"); st.metric("Lessons completed",f"{done}/{len(items)}"); st.progress(done/len(items))
+    st.subheader("Your learning pathway")
+    for i,mod in enumerate(MODULES):
+        c1,c2=st.columns([4,1])
+        with c1:
+            st.markdown(f"**{i+1}. {mod[0]}**"); st.caption(mod[1])
+        with c2:
+            if st.button("Explore",key=f"home_{i}"): go("Learn")
+
+def learn():
     st.title("Your learning pathway")
     st.write("Work through the modules in order. You can revisit any lesson.")
     for m,mod in enumerate(MODULES):
@@ -244,4 +334,5 @@ def main():
     {"Home":home,"Learn":learn,"Lesson":lesson,"Practice":practice,"Sales Project":project,"My Progress":progress}.get(page,home)()
 
 if __name__=="__main__": main()
+
 
