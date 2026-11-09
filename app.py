@@ -154,7 +154,30 @@ def init():
     for k,v in {"page":"Home","module":0,"lesson":0,"completed":[],"attempts":{},"hints":{}}.items():
         if k not in st.session_state: st.session_state[k]=v
 def go(page): st.session_state.page=page; st.rerun()
-def open_lesson(m,l): st.session_state.module=m; st.session_state.lesson=l; go("Lesson")
+def open_lesson(m,l):
+    st.session_state.module=m
+    st.session_state.lesson=l
+    st.session_state.practice_lesson_index=next(
+        (i for i,(lesson_m,lesson_l,_) in enumerate(lessons()) if (lesson_m,lesson_l)==(m,l)), 0
+    )
+    go("Lesson")
+
+def excel_column_name(number):
+    """Convert a 1-based column number to Excel letters (1=A, 27=AA)."""
+    letters = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+def answers_match(submitted, expected):
+    """Compare numeric answers numerically and text answers exactly (case-insensitive)."""
+    submitted_text = submitted.strip().replace("£", "").replace(",", "").replace(" ", "")
+    expected_text = expected.strip().replace("£", "").replace(",", "").replace(" ", "")
+    try:
+        return Decimal(submitted_text) == Decimal(expected_text)
+    except InvalidOperation:
+        return submitted.strip().casefold() == expected.strip().casefold()
 
 def sidebar():
     st.sidebar.title("📘 StudyMate Excel")
@@ -207,37 +230,62 @@ def lesson():
     st.caption(f"Module {m+1}: {mod[0]} / Lesson {l+1}")
     st.title(x[0]); st.subheader("What you'll learn"); st.write(x[1])
     st.subheader("Worked example"); st.info(x[2])
-    st.subheader("Try it yourself"); st.write(x[3])
-    if st.button("Go to Practice",type="primary"): go("Practice")
+    st.subheader("Try it yourself")
+    st.write(x[3])
+    st.caption("This question checks the idea you have just learned. Use the worked example as a guide, then try it without looking at the answer.")
+    if st.button("Practise this lesson",type="primary"):
+        go("Practice")
     if st.button("Back to Learning Path"): go("Learn")
 
 def practice():
     st.title("Practice")
-    st.write("Start with a little help, then try a question on your own.")
-    items=lessons(); labels=[f"{MODULES[m][0]} · {x[0]}" for m,l,x in items]
-    idx=st.selectbox("Choose a lesson",range(len(items)),format_func=lambda i:labels[i])
+    st.write("Use what you have just learned. Choose guided support, hints or an independent attempt.")
+    items=lessons()
+    labels=[f"{MODULES[m][0]} · {x[0]}" for m,l,x in items]
+    default_idx=min(st.session_state.get("practice_lesson_index", 0), len(items)-1)
+    idx=st.selectbox(
+        "Lesson to practise", range(len(items)), index=default_idx,
+        format_func=lambda i: labels[i], key="practice_lesson_selector"
+    )
+    st.session_state.practice_lesson_index=idx
     m,l,x=items[idx]; k=key(m,l)
-    st.subheader("Your task"); st.write(x[3])
-    level=st.radio("Practice level",["Guided","With hints","Independent"],horizontal=True,key=f"level_{k}")
-    if level=="Guided": st.info("1. Read the question.  2. Recall the lesson.  3. Enter your answer.")
-    if level=="With hints":
+
+    st.caption(f"Module {m+1}: {MODULES[m][0]} / Lesson {l+1}")
+    st.subheader("Remember the lesson")
+    with st.expander("Review the explanation and worked example", expanded=True):
+        st.markdown(f"**Key idea**  \n{x[1]}")
+        st.info(x[2])
+    st.subheader("Your exercise")
+    st.write(x[3])
+
+    level=st.radio("Choose your support level",["Guided","With hints","Independent"],horizontal=True,key=f"level_{k}")
+    if level=="Guided":
+        st.info("Start by applying the key idea above to this question.")
+        st.markdown(f"**Step 1:** {x[5]}")
+        st.caption("Use the worked example to help you decide what to do next. Enter your own answer below.")
+    elif level=="With hints":
         if st.button("Show next hint",key=f"hintbtn_{k}"):
-            st.session_state.hints[k]=min(st.session_state.hints.get(k,0)+1,2); st.rerun()
+            st.session_state.hints[k]=min(st.session_state.hints.get(k,0)+1,2)
         n=st.session_state.hints.get(k,0)
         if n>=1: st.info("Hint 1: "+x[5])
         if n>=2: st.info("Hint 2: "+x[6])
+        if n==0: st.caption("Hints are revealed one at a time so you can still work out the answer yourself.")
+    else:
+        st.caption("No hints are shown. Try to answer using what you remember from the lesson.")
+
     ans=st.text_input("Your answer",key=f"answer_{k}",placeholder="Type your answer")
     if st.button("Check My Answer",type="primary",key=f"check_{k}"):
-        if not ans.strip(): st.warning("Enter an answer first.")
+        if not ans.strip():
+            st.warning("Enter an answer first.")
         else:
-            expected=x[4].strip().lower()
-            submitted=ans.strip().lower().replace("£","").replace(",","")
             st.session_state.attempts[k]=st.session_state.attempts.get(k,0)+1
-            if submitted==expected:
+            if answers_match(ans, x[4]):
                 st.success("Correct! Well done. "+x[7])
                 st.session_state.completed=sorted(set(st.session_state.completed+[k]))
-            else: st.warning("Not quite. That's okay. "+x[5]+" Try again or choose With hints for more support.")
-    if st.button("Read the lesson again",key=f"review_{k}"): open_lesson(m,l)
+            else:
+                st.warning("Not quite. Your answer doesn't match the expected answer yet. "+x[5]+" Review the worked example and try again.")
+    if st.button("Read the lesson again",key=f"review_{k}"):
+        open_lesson(m,l)
 
 def project():
     st.title("Practical project: Analyse shop sales")
@@ -245,8 +293,12 @@ def project():
     try: df=pd.read_excel(DATA)
     except Exception as e:
         st.error(f"Could not open the sample dataset: {e}"); return
-    st.subheader("Sample dataset"); st.caption("Each row represents one sale.")
-    st.dataframe(df,use_container_width=True,hide_index=True)
+    st.subheader("Sample dataset")
+    st.caption("Each row represents one sale. Column letters and row numbers follow the layout used in Excel.")
+    excel_view=df.copy()
+    excel_view.columns=[f"{excel_column_name(i)} · {column}" for i,column in enumerate(df.columns, start=1)]
+    excel_view.index=pd.RangeIndex(start=2, stop=len(excel_view)+2, name="Row")
+    st.dataframe(excel_view,use_container_width=True)
     st.download_button("Download sales dataset",DATA.read_bytes(),"StudyMate_sales_dataset.xlsx")
     st.subheader("Explore the results")
     a,b,c=st.columns(3)
