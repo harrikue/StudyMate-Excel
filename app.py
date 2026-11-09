@@ -1,7 +1,128 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import re
+from decimal import Decimal, InvalidOperation
 
+
+def normalise_text(answer):
+    """Standardise text without changing its meaning."""
+    if answer is None:
+        return ""
+
+    answer = str(answer).strip().lower()
+
+    # Replace multiple spaces, tabs and line breaks with one space.
+    answer = re.sub(r"\s+", " ", answer)
+
+    # Remove unnecessary punctuation around the answer.
+    answer = answer.strip(" .,!?:;")
+
+    # Ignore an introductory article for simple answers.
+    answer = re.sub(r"^(a|an|the)\s+", "", answer)
+
+    return answer
+
+
+def convert_to_number(answer):
+    """Convert a learner's numeric response into a Decimal."""
+    if answer is None:
+        return None
+
+    value = str(answer).strip()
+
+    if not value:
+        return None
+
+    # Allow common currency symbols and thousands separators.
+    value = value.replace(",", "")
+    value = re.sub(r"[£$€]", "", value)
+    value = value.strip()
+
+    try:
+        number = Decimal(value)
+
+        # Reject invalid values such as NaN and infinity.
+        if not number.is_finite():
+            return None
+
+        return number
+
+    except InvalidOperation:
+        return None
+
+
+def validate_answer(
+    user_answer,
+    correct_answer,
+    answer_type="text",
+    accepted_answers=None,
+    tolerance=Decimal("0.01")
+):
+    """
+    Validate text or numerical answers.
+
+    Returns:
+        (True, feedback) when the answer is correct.
+        (False, feedback) when the answer is incorrect or missing.
+    """
+
+    # Check for a missing answer.
+    if user_answer is None or str(user_answer).strip() == "":
+        return False, "Please enter an answer before checking your work."
+
+    # Numerical answer validation.
+    if answer_type == "number":
+        submitted_number = convert_to_number(user_answer)
+        expected_number = convert_to_number(correct_answer)
+
+        if expected_number is None:
+            return False, "The expected answer could not be validated."
+
+        if submitted_number is None:
+            return False, (
+                "Please enter a valid number. "
+                "Check that your answer contains only numeric values."
+            )
+
+        if abs(submitted_number - expected_number) <= tolerance:
+            return True, (
+                "Well done! Your numerical answer is correct."
+            )
+
+        return False, (
+            "Not quite. Check your calculation and try again. "
+            "You can use a hint if you need help."
+        )
+
+    # Text answer validation.
+    if answer_type == "text":
+        submitted_text = normalise_text(user_answer)
+        expected_text = normalise_text(correct_answer)
+
+        # Include the main answer and any explicitly approved alternatives.
+        possible_answers = [correct_answer]
+
+        if accepted_answers:
+            possible_answers.extend(accepted_answers)
+
+        normalised_answers = {
+            normalise_text(answer)
+            for answer in possible_answers
+            if answer is not None
+        }
+
+        if submitted_text in normalised_answers:
+            return True, (
+                "Well done! Your answer is correct."
+            )
+
+        return False, (
+            "Not quite. Review the lesson and think about the "
+            "Excel concept being described. Try again or request a hint."
+        )
+
+    return False, "This exercise has an unsupported answer type."
 st.set_page_config(page_title="StudyMate Excel", page_icon="📘", layout="wide")
 DATA = Path(__file__).parent / "data" / "sales_dataset.xlsx"
 
